@@ -1,0 +1,110 @@
+name: Build Nginx Dynamic Modules
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      nginx_version:
+        description: "Nginx version (e.g. 1.28.0)"
+        required: true
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os_name: [jammy, noble]
+        arch: [amd64, arm64]
+        include:
+          - os_name: jammy
+            os: ubuntu-22.04
+          - os_name: noble
+            os: ubuntu-24.04
+          - arch: arm64
+            runner_arch: arm64
+          - arch: amd64
+            runner_arch: amd64
+
+    steps:
+      - name: Set Nginx version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "NGINX_VERSION=${{ inputs.nginx_version }}" >> $GITHUB_ENV
+          else
+            echo "NGINX_VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
+          fi
+
+      - name: Validate Nginx version
+        run: |
+          if ! echo "$NGINX_VERSION" | grep -qP '^\d+\.\d+\.\d+(-\d+)?$'; then
+            echo "::error::Invalid nginx version: $NGINX_VERSION (expected format: x.y.z or x.y.z-n)"
+            exit 1
+          fi
+          echo "NGINX_BASE_VERSION=${NGINX_VERSION%-*}" >> $GITHUB_ENV
+          wget -q --spider "https://nginx.org/download/nginx-${NGINX_VERSION%-*}.tar.gz" || {
+            echo "::error::Nginx version $NGINX_VERSION not found on nginx.org"
+            exit 1
+          }
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libpcre3-dev zlib1g zlib1g-dev libssl-dev
+
+      - name: Download Nginx source
+        run: |
+          wget -q https://nginx.org/download/nginx-${NGINX_BASE_VERSION}.tar.gz
+          tar -xzf nginx-${NGINX_BASE_VERSION}.tar.gz
+
+      - name: Clone modules
+        run: |
+          git clone --depth 1 https://github.com/AirisX/nginx_cookie_flag_module.git
+          git clone --depth 1 https://github.com/openresty/headers-more-nginx-module.git
+
+      - name: Build modules
+        working-directory: nginx-${{ env.NGINX_BASE_VERSION }}
+        run: |
+          ./configure --with-compat \
+            --add-dynamic-module=../nginx_cookie_flag_module \
+            --add-dynamic-module=../headers-more-nginx-module
+          make modules
+
+      - name: Prepare artifacts
+        run: |
+          mkdir -p output
+          cp nginx-${NGINX_BASE_VERSION}/objs/ngx_http_cookie_flag_filter_module.so output/
+          cp nginx-${NGINX_BASE_VERSION}/objs/ngx_http_headers_more_filter_module.so output/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nginx-modules-${{ matrix.os_name }}-${{ matrix.arch }}
+          path: output/*.so
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Package artifacts
+        run: |
+          cd artifacts
+          for dir in */; do
+            name="${dir%/}"
+            tar -czf "${name}.tar.gz" -C "$dir" .
+          done
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.tar.gz
+          generate_release_notes: true
