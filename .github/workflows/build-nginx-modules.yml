@@ -14,6 +14,7 @@ jobs:
   build:
     runs-on: ${{ matrix.runner }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os_name: jammy
@@ -71,7 +72,7 @@ jobs:
       - name: Build modules
         working-directory: nginx-${{ env.NGINX_BASE_VERSION }}
         run: |
-          ./configure --with-compat \
+          ./configure --with-compat --with-stream \
             --add-dynamic-module=../nginx_cookie_flag_module \
             --add-dynamic-module=../headers-more-nginx-module \
             --add-dynamic-module=../ngx_brotli \
