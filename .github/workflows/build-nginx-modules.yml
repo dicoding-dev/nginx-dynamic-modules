@@ -12,20 +12,22 @@ on:
 
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        os_name: [jammy, noble]
-        arch: [amd64, arm64]
         include:
           - os_name: jammy
-            os: ubuntu-22.04
+            arch: amd64
+            runner: ubuntu-22.04
+          - os_name: jammy
+            arch: arm64
+            runner: ubuntu-22.04-arm
           - os_name: noble
-            os: ubuntu-24.04
-          - arch: arm64
-            runner_arch: arm64
-          - arch: amd64
-            runner_arch: amd64
+            arch: amd64
+            runner: ubuntu-24.04
+          - os_name: noble
+            arch: arm64
+            runner: ubuntu-24.04-arm
 
     steps:
       - name: Set Nginx version
